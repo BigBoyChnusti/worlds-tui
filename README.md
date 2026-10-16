@@ -142,3 +142,12 @@ git push origin v0.1.0
 
 Build the same files locally with `goreleaser release --snapshot --clean`;
 they land in `dist/`.
+
+## License
+
+Copyright 2026 BigBoyChnusti
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+League of Legends and Worlds are trademarks of Riot Games, Inc. This
+project is not endorsed by or affiliated with Riot Games.

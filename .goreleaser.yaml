@@ -49,6 +49,7 @@ nfpms:
       Terminal app for the League of Legends World Championship.
       Live game stats and the Play-In, Swiss and Knockout brackets.
     section: games
+    license: Apache-2.0
     formats:
       - deb
       - rpm
@@ -56,6 +57,13 @@ nfpms:
     contents:
       - src: README.md
         dst: /usr/share/doc/worlds-tui/README.md
+      - src: LICENSE
+        dst: /usr/share/licenses/worlds-tui/LICENSE
+        packager: rpm
+        type: license
+      - src: LICENSE
+        dst: /usr/share/doc/worlds-tui/copyright
+        packager: deb
 
 checksum:
   name_template: checksums.txt
