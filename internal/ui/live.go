@@ -109,12 +109,22 @@ func (m Model) renderNoLive() string {
 	return b.String()
 }
 
+// eventTitle renders "T1 vs GEN", with the winner first once decided.
 func eventTitle(e esports.Event) string {
 	codes := []string{"TBD", "TBD"}
+	var outcome [2]string
+	var wins [2]int
 	for i := 0; i < 2 && i < len(e.Match.Teams); i++ {
-		if e.Match.Teams[i].Known() {
-			codes[i] = e.Match.Teams[i].Code
+		t := e.Match.Teams[i]
+		if t.Known() {
+			codes[i] = t.Code
 		}
+		if t.Result != nil {
+			outcome[i], wins[i] = t.Result.Outcome, t.Result.GameWins
+		}
+	}
+	if secondWon(e.State, outcome[0], outcome[1], wins[0], wins[1]) {
+		codes[0], codes[1] = codes[1], codes[0]
 	}
 	return codes[0] + " vs " + codes[1]
 }

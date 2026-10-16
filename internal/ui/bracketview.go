@@ -179,10 +179,11 @@ func (m Model) matchList(ms []*bracket.Match) string {
 	return b.String()
 }
 
-// matchLine renders "T1   2–1  GEN" with the winner bold.
+// matchLine renders "T1   2–1  GEN" with the winner first and bold.
 func matchLine(x *bracket.Match, selected bool) string {
+	teams := winnerFirst(x)
 	code := func(i int) string {
-		s := x.Teams[i]
+		s := teams[i]
 		c := "TBD"
 		if s.Known() {
 			c = s.Code
@@ -197,8 +198,8 @@ func matchLine(x *bracket.Match, selected bool) string {
 		return st.Render(c)
 	}
 	score := " vs "
-	if x.State != esports.StateUnstarted && x.Teams[0].Known() {
-		score = fmt.Sprintf(" %d–%d", x.Teams[0].Wins, x.Teams[1].Wins)
+	if x.State != esports.StateUnstarted && teams[0].Known() {
+		score = fmt.Sprintf(" %d–%d", teams[0].Wins, teams[1].Wins)
 		score += " "
 	}
 	marker := "  "

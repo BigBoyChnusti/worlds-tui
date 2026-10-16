@@ -131,13 +131,39 @@ func slotLine(s bracket.Slot, width int, state string) string {
 	return line
 }
 
-// matchBox draws a bracket match as a bordered two-line box.
+// secondWon reports whether the second team of a match won it, so that
+// completed matches can list their winner first. A slot outcome of "win"
+// decides it; a completed match without outcomes falls back to game wins.
+func secondWon(state, outcome0, outcome1 string, wins0, wins1 int) bool {
+	switch {
+	case outcome1 == "win":
+		return true
+	case outcome0 == "win":
+		return false
+	}
+	return state == esports.StateCompleted && wins1 > wins0
+}
+
+// winnerFirst returns the match's slots in display order: the winner first
+// for a completed match, data order otherwise. m.Teams itself is left alone
+// because pools and records index into it.
+func winnerFirst(m *bracket.Match) [2]bracket.Slot {
+	t := m.Teams
+	if secondWon(m.State, t[0].Outcome, t[1].Outcome, t[0].Wins, t[1].Wins) {
+		t[0], t[1] = t[1], t[0]
+	}
+	return t
+}
+
+// matchBox draws a bracket match as a bordered two-line box, winner on top
+// once the match is decided.
 func matchBox(m *bracket.Match, label string, selected bool) string {
 	const w = 10
 	if m == nil {
 		return stBox.Render(stMuted.Render(pad("TBD", w)) + "\n" + stMuted.Render(pad("TBD", w)))
 	}
-	body := slotLine(m.Teams[0], w, m.State) + "\n" + slotLine(m.Teams[1], w, m.State)
+	t := winnerFirst(m)
+	body := slotLine(t[0], w, m.State) + "\n" + slotLine(t[1], w, m.State)
 	style := stBox
 	switch {
 	case selected:
