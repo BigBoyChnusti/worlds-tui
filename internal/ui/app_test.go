@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/BigBoyChnusti/worlds-tui/internal/bracket"
 	"github.com/BigBoyChnusti/worlds-tui/internal/esports"
 	"github.com/BigBoyChnusti/worlds-tui/internal/livestats"
 )
@@ -140,7 +141,7 @@ func TestTabsRenderStages(t *testing.T) {
 	cases := map[string][]string{
 		"3": {"Round 1", "Round 5", "3–0", "AL  KT", "eliminated"},
 		"4": {"Quarterfinals", "Semifinals", "Final", "T1 3–2 KT"},
-		"5": {"VKS 0–1 TSW", "Quarterfinals"},
+		"5": {"TSW 1–0 VKS", "Quarterfinals"},
 	}
 	for key, wants := range cases {
 		m, _ = press(t, m, key)
@@ -454,5 +455,69 @@ func TestMouse(t *testing.T) {
 	m = clickZone(t, m, boxZone(m.bracket.Knockout.Final.ID))
 	if m.matchID != m.bracket.Knockout.Final.ID {
 		t.Errorf("box click opened %s", m.matchID)
+	}
+}
+
+func TestWinnerFirst(t *testing.T) {
+	slots := func(w0, w1 int, o0, o1 string) [2]bracket.Slot {
+		return [2]bracket.Slot{{Code: "GEN", Wins: w0, Outcome: o0}, {Code: "T1", Wins: w1, Outcome: o1}}
+	}
+	cases := []struct {
+		name      string
+		m         bracket.Match
+		top, line string
+	}{
+		{"second won", bracket.Match{State: esports.StateCompleted, Teams: slots(1, 3, "loss", "win")}, "T1", "T1 3–1 GEN"},
+		{"first won", bracket.Match{State: esports.StateCompleted, Teams: slots(3, 2, "win", "loss")}, "GEN", "GEN 3–2 T1"},
+		{"completed without outcomes", bracket.Match{State: esports.StateCompleted, Teams: slots(0, 2, "", "")}, "T1", "T1 2–0 GEN"},
+		{"outcome before state flips", bracket.Match{State: esports.StateInProgress, Teams: slots(1, 3, "loss", "win")}, "T1", "T1 3–1 GEN ●"},
+		{"in progress keeps order", bracket.Match{State: esports.StateInProgress, Teams: slots(0, 1, "", "")}, "GEN", "GEN 0–1 T1 ●"},
+		{"unstarted keeps order", bracket.Match{State: esports.StateUnstarted, Teams: slots(0, 0, "", "")}, "GEN", "GEN vs T1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := c.m.Teams
+			box := strings.Split(ansi.Strip(matchBox(&c.m, "", false)), "\n")
+			if len(box) != 4 {
+				t.Fatalf("box has %d lines, want 4:\n%s", len(box), strings.Join(box, "\n"))
+			}
+			if got := strings.Fields(strings.Trim(box[1], "│ "))[0]; got != c.top {
+				t.Errorf("box top = %q, want %q", got, c.top)
+			}
+			if got := strings.Join(strings.Fields(ansi.Strip(matchLine(&c.m, false))), " "); got != c.line {
+				t.Errorf("matchLine = %q, want %q", got, c.line)
+			}
+			if c.m.Teams != orig {
+				t.Errorf("Teams reordered in data: %+v", c.m.Teams)
+			}
+		})
+	}
+}
+
+func TestEventTitleWinnerFirst(t *testing.T) {
+	ev := func(state string, r0, r1 *esports.Result) esports.Event {
+		var e esports.Event
+		e.State = state
+		e.Match.Teams = []esports.Team{{Code: "GEN", Result: r0}, {Code: "T1", Result: r1}}
+		return e
+	}
+	cases := []struct {
+		e    esports.Event
+		want string
+	}{
+		{ev(esports.StateCompleted, &esports.Result{Outcome: "loss", GameWins: 1}, &esports.Result{Outcome: "win", GameWins: 3}), "T1 vs GEN"},
+		{ev(esports.StateCompleted, &esports.Result{Outcome: "win", GameWins: 3}, &esports.Result{Outcome: "loss", GameWins: 1}), "GEN vs T1"},
+		{ev(esports.StateUnstarted, nil, nil), "GEN vs T1"},
+		{ev(esports.StateInProgress, &esports.Result{GameWins: 0}, &esports.Result{GameWins: 2}), "GEN vs T1"},
+	}
+	for _, c := range cases {
+		if got := eventTitle(c.e); got != c.want {
+			t.Errorf("eventTitle(%s) = %q, want %q", c.e.State, got, c.want)
+		}
+	}
+	var tbd esports.Event
+	tbd.State = esports.StateUnstarted
+	if got := eventTitle(tbd); got != "TBD vs TBD" {
+		t.Errorf("eventTitle(no teams) = %q", got)
 	}
 }
