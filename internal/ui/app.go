@@ -986,7 +986,7 @@ func (m Model) renderHeader() string {
 	}
 	line := title + "  " + strings.Join(tabs, "") + live
 	rule := stMuted.Render(strings.Repeat("─", max(0, m.width)))
-	return line + "\n" + rule
+	return truncateANSI(line, m.width) + "\n" + rule
 }
 
 func (m Model) renderFooter() string {
