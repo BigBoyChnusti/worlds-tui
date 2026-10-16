@@ -18,7 +18,10 @@ func Snapshot(cfg Config, width, height int) string {
 		queue = append(queue, m.startGame(cfg.GameID))
 	}
 	var model tea.Model = m
-	for steps := 0; len(queue) > 0 && steps < 50; steps++ {
+	// The cap only guards against a command loop. Loading the game, then
+	// Data Dragon, then the champion icons takes more steps than the
+	// tournament data alone.
+	for steps := 0; len(queue) > 0 && steps < 100; steps++ {
 		cmd := queue[0]
 		queue = queue[1:]
 		if cmd == nil {

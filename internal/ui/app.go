@@ -93,6 +93,11 @@ type Model struct {
 	play         map[string]playState
 	ddData       *ddragon.Data
 	ddLoading    bool
+	// Champion icons by champion key, downscaled for the player table.
+	// iconsAsked holds keys whose load is running or done, so each icon is
+	// requested once per Data Dragon version.
+	icons      map[string]*champIcon
+	iconsAsked map[string]bool
 
 	dataLoading bool
 	lastData    time.Time
@@ -119,6 +124,8 @@ func New(cfg Config) Model {
 		startAttempt: map[string]time.Time{},
 		backfilled:   map[string]bool{},
 		play:         map[string]playState{},
+		icons:        map[string]*champIcon{},
+		iconsAsked:   map[string]bool{},
 		gameIdx:      -1,
 		preferGame:   cfg.GameID,
 		now:          time.Now(),
@@ -165,6 +172,11 @@ type (
 	ddMsg struct {
 		data *ddragon.Data
 		err  error
+	}
+	iconsMsg struct {
+		version string
+		icons   map[string]*champIcon
+		failed  []string
 	}
 )
 
@@ -314,6 +326,54 @@ func (m Model) loadDDragon(patch string) tea.Cmd {
 		defer cancel()
 		d, err := dd.ForPatch(c, patch)
 		return ddMsg{data: d, err: err}
+	}
+}
+
+// loadIcons fetches the icons of every champion in the loaded games that
+// has not been asked for yet, in one command so a whole draft arrives as a
+// single message. Keys are marked as asked here; failed ones are cleared
+// again by the iconsMsg so a later game can retry them.
+func (m *Model) loadIcons() tea.Cmd {
+	if m.ddData == nil {
+		return nil
+	}
+	var want []string
+	for _, g := range m.games {
+		for _, tm := range []livestats.TeamMeta{g.Meta.BlueTeamMetadata, g.Meta.RedTeamMetadata} {
+			for _, p := range tm.ParticipantMetadata {
+				if k := p.ChampionID; k != "" && !m.iconsAsked[k] {
+					m.iconsAsked[k] = true
+					want = append(want, k)
+				}
+			}
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	dd, ver := m.dd, m.ddData.Version
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		msg := iconsMsg{version: ver, icons: map[string]*champIcon{}}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for _, k := range want {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				img, err := dd.ChampionIcon(c, ver, k)
+				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					msg.failed = append(msg.failed, k)
+					return
+				}
+				msg.icons[k] = newChampIcon(img)
+			}()
+		}
+		wg.Wait()
+		return msg
 	}
 }
 
@@ -579,6 +639,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ddLoading = true
 			cmds = append(cmds, m.loadDDragon(g.Meta.PatchVersion))
 		}
+		cmds = append(cmds, m.loadIcons())
 		cmds = append(cmds, m.ensureGame())
 		return m, tea.Batch(cmds...)
 
@@ -620,6 +681,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ddData = msg.data
+		return m, m.loadIcons()
+
+	case iconsMsg:
+		if m.ddData == nil || msg.version != m.ddData.Version {
+			return m, nil
+		}
+		for k, ic := range msg.icons {
+			m.icons[k] = ic
+		}
+		for _, k := range msg.failed {
+			delete(m.iconsAsked, k)
+		}
 		return m, nil
 	}
 	return m, nil

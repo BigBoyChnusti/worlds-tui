@@ -295,8 +295,11 @@ func (m Model) renderPlayers(g *livestats.Game, side, code string) string {
 		st = stRed
 	}
 	b.WriteString(st.Render(code+" "+strings.ToUpper(side)) + "\n")
-	b.WriteString(stMuted.Render(pad("Role", 5)+pad("Player", 14)+pad("Champion", 14)+pad("K/D/A", 9)+
-		padLeft("CS", 5)+padLeft("Gold", 8)+padLeft("Lane±", 8)+padLeft("Lvl", 5)+padLeft("KP", 6)+padLeft("Dmg", 6)) + "\n")
+	// The champion icon takes iconCols+1 cells before the role; the number
+	// columns are kept narrow enough that a full row still fits 80 cells.
+	iconPad := strings.Repeat(" ", iconCols+1)
+	b.WriteString(stMuted.Render(iconPad+pad("Role", 5)+pad("Player", 14)+pad("Champion", 14)+pad("K/D/A", 9)+
+		padLeft("CS", 5)+padLeft("Gold", 7)+padLeft("Lane±", 7)+padLeft("Lvl", 4)+padLeft("KP", 5)+padLeft("Dmg", 5)) + "\n")
 	for _, p := range g.Players(side) {
 		name := p.Meta.SummonerName
 		if i := strings.Index(name, " "); i > 0 && strings.HasPrefix(name, code+" ") {
@@ -318,24 +321,30 @@ func (m Model) renderPlayers(g *livestats.Game, side, code string) string {
 			dmg = fmt.Sprintf("%.0f%%", p.Details.ChampionDamageShare*100)
 		}
 		s := p.Stats
-		fmt.Fprintf(&b, "%s%s%s%s%s%s%s%s%s%s\n",
+		icon := m.icons[p.Meta.ChampionID]
+		fmt.Fprintf(&b, "%s %s%s%s%s%s%s%s%s%s%s\n",
+			iconLine(icon, 0),
 			pad(roleShort[p.Meta.Role], 5),
 			pad(name, 14),
 			pad(m.ddData.ChampionName(p.Meta.ChampionID), 14),
 			pad(fmt.Sprintf("%d/%d/%d", s.Kills, s.Deaths, s.Assists), 9),
 			padLeft(fmt.Sprint(s.CreepScore), 5),
-			padLeft(fmtGold(s.TotalGold), 8),
-			padLeft(laneStr, 8),
-			padLeft(fmt.Sprint(s.Level), 5),
-			padLeft(kp, 6),
-			padLeft(dmg, 6))
+			padLeft(fmtGold(s.TotalGold), 7),
+			padLeft(laneStr, 7),
+			padLeft(fmt.Sprint(s.Level), 4),
+			padLeft(kp, 5),
+			padLeft(dmg, 5))
+		// The second line is always written so the icon is complete, even
+		// before item details arrive.
+		items := ""
 		if p.Details != nil && len(p.Details.Items) > 0 {
 			var names []string
 			for _, id := range p.Details.Items {
 				names = append(names, m.ddData.ItemName(id))
 			}
-			b.WriteString(stMuted.Render("     "+strings.Join(names, " · ")) + "\n")
+			items = stMuted.Render("     " + strings.Join(names, " · "))
 		}
+		b.WriteString(strings.TrimRight(iconLine(icon, 1)+" "+items, " ") + "\n")
 	}
 	return b.String()
 }
