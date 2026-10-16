@@ -16,6 +16,16 @@ builds:
       - darwin
     goarch:
       - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    # 32-bit ARM only for Linux (Raspberry Pi OS and similar).
+    ignore:
+      - goos: darwin
+        goarch: arm
+      - goos: windows
+        goarch: arm
     flags:
       - -trimpath
     ldflags:
@@ -26,7 +36,7 @@ archives:
   - id: binaries
     ids: [worlds-tui]
     formats: [binary]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
 
 nfpms:
   - id: packages

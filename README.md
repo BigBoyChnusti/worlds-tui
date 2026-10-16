@@ -8,16 +8,18 @@ Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 ## Install
 
 Download a release from the
-[releases page](https://github.com/BigBoyChnusti/worlds-tui/releases)
-(x86_64 only for now):
+[releases page](https://github.com/BigBoyChnusti/worlds-tui/releases).
+Builds exist for x86_64 (`amd64`), 64-bit ARM (`arm64`, e.g. Raspberry Pi
+4/5 with a 64-bit OS, Apple Silicon, Windows on ARM) and 32-bit ARMv7 on
+Linux (`armhf`/`armv7hl`/`armv7`, e.g. Raspberry Pi OS 32-bit):
 
 | System | File | Install |
 |---|---|---|
-| Debian, Ubuntu | `worlds-tui_<version>_amd64.deb` | `sudo apt install ./worlds-tui_<version>_amd64.deb` |
-| Fedora, RHEL, openSUSE | `worlds-tui-<version>-1.x86_64.rpm` | `sudo dnf install ./worlds-tui-<version>-1.x86_64.rpm` |
-| Any Linux | `worlds-tui_<version>_linux_amd64` | `chmod +x` it and run it |
-| macOS (Intel) | `worlds-tui_<version>_darwin_amd64` | `chmod +x` it and run it |
-| Windows | `worlds-tui_<version>_windows_amd64.exe` | Run it in Windows Terminal |
+| Debian, Ubuntu, Raspberry Pi OS | `worlds-tui_<version>_<amd64\|arm64\|armhf>.deb` | `sudo apt install ./worlds-tui_<version>_<arch>.deb` |
+| Fedora, RHEL, openSUSE | `worlds-tui-<version>-1.<x86_64\|aarch64\|armv7hl>.rpm` | `sudo dnf install ./worlds-tui-<version>-1.<arch>.rpm` |
+| Any Linux | `worlds-tui_<version>_linux_<amd64\|arm64\|armv7>` | `chmod +x` it and run it |
+| macOS | `worlds-tui_<version>_darwin_<amd64\|arm64>` | `chmod +x` it and run it |
+| Windows | `worlds-tui_<version>_windows_<amd64\|arm64>.exe` | Run it in Windows Terminal |
 
 `checksums.txt` lists the SHA-256 of every file.
 
@@ -121,9 +123,11 @@ and 2026), so they don't need the network.
 GitHub Actions runs two workflows:
 
 - **CI** (`.github/workflows/ci.yml`), on every push to `main` and every
-  pull request: gofmt check, `go vet`, `go test -race`, then a GoReleaser
-  snapshot build. The snapshot's binaries, `.deb` and `.rpm` are kept as a
-  workflow artifact for 14 days.
+  pull request: gofmt check, `go vet` and `go test -race` on both an
+  x86_64 and an arm64 runner, then a GoReleaser snapshot build of every
+  target. The snapshot's binaries, `.deb` and `.rpm` files are kept as a
+  workflow artifact for 14 days, and a smoke job installs the `amd64` and
+  `arm64` `.deb` on native runners and starts the installed binary.
 - **Release** (`.github/workflows/release.yml`), on a `v*` tag: runs the
   tests, then [GoReleaser](https://goreleaser.com) builds everything in
   `.goreleaser.yaml` and publishes a GitHub release with a changelog
