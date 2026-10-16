@@ -3,9 +3,12 @@
 package ddragon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -141,14 +144,42 @@ func (c *Client) ForPatch(ctx context.Context, patch string) (*Data, error) {
 	return d, nil
 }
 
+// ChampionIcon returns the square icon of a champion key such as
+// "MonkeyKing" for a Data Dragon version. Icons never change within a
+// version, so the cached file never expires.
+func (c *Client) ChampionIcon(ctx context.Context, version, champion string) (image.Image, error) {
+	if version == "" || champion == "" || strings.ContainsAny(champion, "/\\.") {
+		return nil, fmt.Errorf("ddragon: bad icon %q for version %q", champion, version)
+	}
+	var img image.Image
+	path := "/cdn/" + version + "/img/champion/" + champion + ".png"
+	err := c.fetch(ctx, path, version+"-icon-"+champion+".png", 0, func(b []byte) error {
+		var err error
+		img, err = png.Decode(bytes.NewReader(b))
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
 // fetchJSON decodes path into out, reading from the cache file when it is
 // younger than maxAge (0 means it never expires).
 func (c *Client) fetchJSON(ctx context.Context, path, cacheName string, maxAge time.Duration, out any) error {
+	return c.fetch(ctx, path, cacheName, maxAge, func(b []byte) error { return json.Unmarshal(b, out) })
+}
+
+// fetch downloads path and hands the body to decode, reading from the cache file when it is
+// younger than maxAge (0 means it never expires). decode must accept the
+// body; a cache file it rejects is downloaded again, and a download it
+// rejects is not cached.
+func (c *Client) fetch(ctx context.Context, path, cacheName string, maxAge time.Duration, decode func([]byte) error) error {
 	cachePath := ""
 	if c.CacheDir != "" {
 		cachePath = filepath.Join(c.CacheDir, cacheName)
 		if st, err := os.Stat(cachePath); err == nil && (maxAge == 0 || time.Since(st.ModTime()) < maxAge) {
-			if b, err := os.ReadFile(cachePath); err == nil && json.Unmarshal(b, out) == nil {
+			if b, err := os.ReadFile(cachePath); err == nil && decode(b) == nil {
 				return nil
 			}
 		}
@@ -170,7 +201,7 @@ func (c *Client) fetchJSON(ctx context.Context, path, cacheName string, maxAge t
 	if err != nil {
 		return fmt.Errorf("ddragon: %w", err)
 	}
-	if err := json.Unmarshal(b, out); err != nil {
+	if err := decode(b); err != nil {
 		return fmt.Errorf("ddragon %s: decode: %w", path, err)
 	}
 	if cachePath != "" && os.MkdirAll(c.CacheDir, 0o755) == nil {
