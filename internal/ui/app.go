@@ -128,8 +128,11 @@ func New(cfg Config) Model {
 		iconsAsked:   map[string]bool{},
 		gameIdx:      -1,
 		preferGame:   cfg.GameID,
-		now:          time.Now(),
-		inMenu:       cfg.GameID == "",
+		// A game asked for with -game stays open even when another match
+		// goes live before it loads.
+		pinned: cfg.GameID != "",
+		now:    time.Now(),
+		inMenu: cfg.GameID == "",
 	}
 }
 
