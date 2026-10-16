@@ -14,6 +14,13 @@ import (
 	"github.com/BigBoyChnusti/worlds-tui/internal/ui"
 )
 
+// Set by the release build through -ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	var cfg ui.Config
 	flag.StringVar(&cfg.TournamentSlug, "tournament", "", "tournament slug, e.g. worlds_2025 (default: the current one)")
@@ -23,7 +30,13 @@ func main() {
 	snapshot := flag.Bool("snapshot", false, "print every view once and exit instead of starting the TUI")
 	width := flag.Int("width", 120, "snapshot width")
 	height := flag.Int("height", 50, "snapshot height")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("worlds-tui %s (commit %s, built %s)\n", version, commit, date)
+		return
+	}
 
 	cfg.LeagueID = esports.WorldsLeagueID
 	cfg.LeagueSlug = "worlds"

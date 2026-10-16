@@ -5,14 +5,31 @@ game stats and a viewer for the Play-In, Swiss Stage and Knockouts.
 
 Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## Install and run
+## Install
+
+Download a release from the
+[releases page](https://github.com/BigBoyChnusti/worlds-tui/releases)
+(x86_64 only for now):
+
+| System | File | Install |
+|---|---|---|
+| Debian, Ubuntu | `worlds-tui_<version>_amd64.deb` | `sudo apt install ./worlds-tui_<version>_amd64.deb` |
+| Fedora, RHEL, openSUSE | `worlds-tui-<version>-1.x86_64.rpm` | `sudo dnf install ./worlds-tui-<version>-1.x86_64.rpm` |
+| Any Linux | `worlds-tui_<version>_linux_amd64` | `chmod +x` it and run it |
+| macOS (Intel) | `worlds-tui_<version>_darwin_amd64` | `chmod +x` it and run it |
+| Windows | `worlds-tui_<version>_windows_amd64.exe` | Run it in Windows Terminal |
+
+`checksums.txt` lists the SHA-256 of every file.
+
+With Go installed you can also run
+`go install github.com/BigBoyChnusti/worlds-tui/cmd/worlds-tui@latest`, or
+`go run ./cmd/worlds-tui` from a checkout.
+
+## Run
 
 ```sh
-go install github.com/BigBoyChnusti/worlds-tui/cmd/worlds-tui@latest
 worlds-tui
 ```
-
-Or from a checkout: `go run ./cmd/worlds-tui`.
 
 | Flag | Default | |
 |---|---|---|
@@ -20,6 +37,7 @@ Or from a checkout: `go run ./cmd/worlds-tui`.
 | `-game` | | Open a game id on start, e.g. to replay a finished game |
 | `-refresh` | `10s` | Live game poll interval |
 | `-data-refresh` | `1m` | Standings and schedule refresh interval |
+| `-version` | | Print the version and exit |
 | `-snapshot` | | Print the menu and every view once and exit (`-width` and `-height` set the size) |
 
 Try a finished game: `worlds-tui -tournament worlds_2025 -game 113475798006664579`
@@ -97,3 +115,26 @@ go vet ./...
 
 Tests run against API responses saved in `internal/*/testdata` (Worlds 2025
 and 2026), so they don't need the network.
+
+## CI and releases
+
+GitHub Actions runs two workflows:
+
+- **CI** (`.github/workflows/ci.yml`), on every push to `main` and every
+  pull request: gofmt check, `go vet`, `go test -race`, then a GoReleaser
+  snapshot build. The snapshot's binaries, `.deb` and `.rpm` are kept as a
+  workflow artifact for 14 days.
+- **Release** (`.github/workflows/release.yml`), on a `v*` tag: runs the
+  tests, then [GoReleaser](https://goreleaser.com) builds everything in
+  `.goreleaser.yaml` and publishes a GitHub release with a changelog
+  grouped by commit type.
+
+To cut a release:
+
+```sh
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+Build the same files locally with `goreleaser release --snapshot --clean`;
+they land in `dist/`.

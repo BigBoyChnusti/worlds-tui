@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  # Builds the binaries and packages exactly as a release would, without
+  # publishing, and keeps them as workflow artifacts.
+  snapshot:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: worlds-tui-snapshot
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/worlds-tui_*_amd64*/worlds-tui*
+            dist/checksums.txt
+          retention-days: 14
