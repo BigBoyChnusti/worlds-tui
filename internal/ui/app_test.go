@@ -206,6 +206,31 @@ func TestOpenMatchShowsGame(t *testing.T) {
 		t.Error("team prefix not stripped from player names")
 	}
 
+	// Big terminals get the scoreboard, small ones the compact table; the
+	// gold chart shows in both and no line is wider than the terminal.
+	for _, sz := range []struct {
+		w, h int
+		want []string
+	}{
+		{200, 60, []string{"TOWERS", "DRAGONS", "╚════██╗", "FLY ▲", "T1 ▼", "+12k ┤", "0 ┼───"}},
+		{120, 60, []string{"TOWERS", "╚════██╗", "0 ┼───"}},
+		{80, 24, []string{"Kills     Gold  Towers", "0 ┼───", "FLY ▲"}},
+	} {
+		tm, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
+		v := tm.(Model).View()
+		for i, l := range strings.Split(v, "\n") {
+			if w := lipgloss.Width(l); w > sz.w {
+				t.Errorf("%dx%d: line %d is %d cells wide: %q", sz.w, sz.h, i, w, ansi.Strip(l))
+			}
+		}
+		p := ansi.Strip(v)
+		for _, w := range sz.want {
+			if !strings.Contains(p, w) {
+				t.Errorf("%dx%d: live view missing %q in\n%s", sz.w, sz.h, w, p)
+			}
+		}
+	}
+
 	// Following live again unpins the match.
 	m, _ = press(t, m, "f")
 	if m.pinned {

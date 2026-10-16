@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/BigBoyChnusti/worlds-tui/internal/esports"
 	"github.com/BigBoyChnusti/worlds-tui/internal/livestats"
 )
@@ -260,22 +262,30 @@ func (m Model) renderGame(gm esports.Game, full *livestats.Game) string {
 	fmt.Fprintf(&b, "%s  %s  %s\n\n", stBold.Render(fmt.Sprintf("Game %d", gm.Number)),
 		stAccent.Render(fmtClock(full.ClockAt(at))), stateTag)
 
-	// Team summary.
+	// Team summary: a big scoreboard when there is room for it.
 	bt, rt := g.Latest.BlueTeam, g.Latest.RedTeam
-	hdr := pad("", 8) + padLeft("Kills", 6) + padLeft("Gold", 9) + padLeft("Towers", 8) +
-		padLeft("Inhib", 7) + padLeft("Baron", 7) + "  Dragons"
-	b.WriteString(stMuted.Render(hdr) + "\n")
-	row := func(code string, st func(...string) string, t livestats.TeamFrame) string {
-		var drakes []string
-		for _, d := range t.Dragons {
-			drakes = append(drakes, dragonTag(d))
-		}
-		return st(pad(code, 8)) + padLeft(fmt.Sprint(t.TotalKills), 6) + padLeft(fmtGold(t.TotalGold), 9) +
-			padLeft(fmt.Sprint(t.Towers), 8) + padLeft(fmt.Sprint(t.Inhibitors), 7) +
-			padLeft(fmt.Sprint(t.Barons), 7) + "  " + strings.Join(drakes, " ")
+	sb := ""
+	if m.height >= scoreboardMinHeight {
+		sb = scoreboard(blueCode, redCode, bt, rt, full.ClockAt(at), m.width)
 	}
-	b.WriteString(row(blueCode, stBlue.Render, bt) + "\n")
-	b.WriteString(row(redCode, stRed.Render, rt) + "\n\n")
+	if sb != "" {
+		b.WriteString(sb + "\n\n")
+	} else {
+		hdr := pad("", 8) + padLeft("Kills", 6) + padLeft("Gold", 9) + padLeft("Towers", 8) +
+			padLeft("Inhib", 7) + padLeft("Baron", 7) + "  Dragons"
+		b.WriteString(stMuted.Render(hdr) + "\n")
+		row := func(code string, st func(...string) string, t livestats.TeamFrame) string {
+			var drakes []string
+			for _, d := range t.Dragons {
+				drakes = append(drakes, dragonTag(d))
+			}
+			return st(pad(code, 8)) + padLeft(fmt.Sprint(t.TotalKills), 6) + padLeft(fmtGold(t.TotalGold), 9) +
+				padLeft(fmt.Sprint(t.Towers), 8) + padLeft(fmt.Sprint(t.Inhibitors), 7) +
+				padLeft(fmt.Sprint(t.Barons), 7) + "  " + strings.Join(drakes, " ")
+		}
+		b.WriteString(row(blueCode, stBlue.Render, bt) + "\n")
+		b.WriteString(row(redCode, stRed.Render, rt) + "\n\n")
+	}
 
 	diff := g.GoldDiff()
 	lead := stMuted.Render("Gold even")
@@ -284,15 +294,14 @@ func (m Model) renderGame(gm esports.Game, full *livestats.Game) string {
 	} else if diff < 0 {
 		lead = "Gold lead " + stRed.Render(redCode) + " " + fmtDiff(diff)
 	}
-	b.WriteString(lead + "\n")
-	if hist := g.History(time.Minute); len(hist) > 1 {
-		b.WriteString(sparkline(hist, max(10, m.width-2)) + "\n")
+	b.WriteString(lead + chartLegend(blueCode, redCode, m.width-lipgloss.Width(lead)) + "\n")
+	players := m.renderPlayers(g, "blue", blueCode) + "\n" + m.renderPlayers(g, "red", redCode)
+	pts, end := goldSeries(full, at)
+	if chart := goldChart(pts, end, m.width-1, m.chartRows(b.String(), players), blueCode, redCode); chart != "" {
+		b.WriteString(chart + "\n")
 	}
 	b.WriteString("\n")
-
-	b.WriteString(m.renderPlayers(g, "blue", blueCode))
-	b.WriteString("\n")
-	b.WriteString(m.renderPlayers(g, "red", redCode))
+	b.WriteString(players)
 	return b.String()
 }
 
@@ -357,35 +366,4 @@ func (m Model) renderPlayers(g *livestats.Game, side, code string) string {
 		b.WriteString(strings.TrimRight(iconLine(icon, 1)+" "+items, " ") + "\n")
 	}
 	return b.String()
-}
-
-// sparkline draws the gold difference over time, blue above zero and red
-// below, keeping the most recent points that fit in width.
-func sparkline(hist []livestats.GoldPoint, width int) string {
-	if len(hist) > width {
-		hist = hist[len(hist)-width:]
-	}
-	maxAbs := 1
-	for _, p := range hist {
-		maxAbs = max(maxAbs, p.Diff, -p.Diff)
-	}
-	bars := []rune("▁▂▃▄▅▆▇█")
-	var b strings.Builder
-	for _, p := range hist {
-		v := p.Diff
-		if v < 0 {
-			v = -v
-		}
-		idx := v * (len(bars) - 1) / maxAbs
-		ch := string(bars[idx])
-		switch {
-		case p.Diff > 0:
-			b.WriteString(stBlue.Render(ch))
-		case p.Diff < 0:
-			b.WriteString(stRed.Render(ch))
-		default:
-			b.WriteString(stMuted.Render(ch))
-		}
-	}
-	return b.String() + stMuted.Render(fmt.Sprintf("  max %s", fmtGold(maxAbs)))
 }
