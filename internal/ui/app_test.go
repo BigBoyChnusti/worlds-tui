@@ -521,3 +521,21 @@ func TestEventTitleWinnerFirst(t *testing.T) {
 		t.Errorf("eventTitle(no teams) = %q", got)
 	}
 }
+
+// With -game, a live match listed before the game's first window must not
+// take over the Live tab.
+func TestGameFlagBeatsLiveMatch(t *testing.T) {
+	m := New(Config{LeagueID: esports.WorldsLeagueID, LeagueSlug: "worlds", GameID: "113475798006664579"})
+	var tm tea.Model = m
+	live := esports.Event{League: esports.League{Slug: "worlds"}, Match: esports.Match{ID: "other-live-match"}}
+	tm, _ = tm.Update(liveMsg{events: []esports.Event{live}})
+	if id := tm.(Model).matchID; id != "" {
+		t.Fatalf("live match %s opened before the requested game", id)
+	}
+	var start livestats.Window
+	readJSON(t, "../livestats/testdata/window_start.json", &start)
+	tm, _ = tm.Update(gameStartMsg{gameID: "113475798006664579", window: &start})
+	if id := tm.(Model).matchID; id != "113475798006664578" {
+		t.Fatalf("opened match %s, want the -game match", id)
+	}
+}
