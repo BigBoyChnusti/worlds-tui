@@ -5,6 +5,8 @@ game stats and a viewer for the Play-In, Swiss Stage and Knockouts.
 
 Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+![worlds-tui demo: main menu, live game stats, Play-In, Swiss, Knockouts and Schedule](demo/demo.gif)
+
 ## Install
 
 Download a release from the
@@ -128,6 +130,14 @@ go vet ./...
 
 Tests run against API responses saved in `internal/*/testdata` (Worlds 2025
 and 2026), so they don't need the network.
+
+The demo GIF is recorded with [VHS](https://github.com/charmbracelet/vhs)
+from `demo/demo.tape`. It runs against the live API, so the Live tab shows
+whatever match is on at the time:
+
+```sh
+vhs demo/demo.tape
+```
 
 ## CI and releases
 
