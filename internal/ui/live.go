@@ -67,7 +67,7 @@ func (m Model) renderLive() string {
 		if gm.State == esports.StateUnstarted && m.details.Match.State != esports.StateInProgress {
 			b.WriteString(m.renderNotStarted())
 		} else {
-			b.WriteString(stMuted.Render(fmt.Sprintf("Game %d · waiting for live stats…", gm.Number)))
+			b.WriteString(m.renderWaiting(gm))
 		}
 		return b.String()
 	}
@@ -117,6 +117,29 @@ func eventTitle(e esports.Event) string {
 		}
 	}
 	return codes[0] + " vs " + codes[1]
+}
+
+// renderWaiting covers a game the gateway reports as running while the
+// stats feed has no frames yet: during the draft and the break before a
+// game loads, and when the feed lags behind a running game (seen for 25
+// minutes in the 2026 Play-In).
+func (m Model) renderWaiting(gm esports.Game) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s  %s\n\n", stBold.Render(fmt.Sprintf("Game %d", gm.Number)), stAccent.Render("waiting for the game to load"))
+	b.WriteString("The match is live, but the stats feed has no data for this game yet.\n")
+	b.WriteString("That happens during the draft and the break between games, and sometimes\n")
+	b.WriteString("the feed is late for a game that is already running. Stats appear as soon\n")
+	b.WriteString("as it delivers them.\n\n")
+	if t, ok := m.startAttempt[gm.ID]; ok {
+		next := t.Add(startRetryEvery).Sub(m.now)
+		fmt.Fprintf(&b, "%s", stMuted.Render(fmt.Sprintf("Last checked %s, next check in %ds.", t.Local().Format("15:04:05"), max(0, int(next.Seconds())))))
+	} else {
+		b.WriteString(stMuted.Render("Checking…"))
+	}
+	if m.gameIdx > 0 {
+		b.WriteString("\n" + stMuted.Render("Press ← to see the previous game."))
+	}
+	return b.String()
 }
 
 func (m Model) renderNotStarted() string {
@@ -170,28 +193,32 @@ func (m Model) renderSeriesHeader() string {
 	}
 	line1 := title + "   " + stMuted.Render(strings.Join(meta, " · "))
 
+	// Name and state marker are styled separately: lipgloss underlines rune
+	// by rune, which breaks escape codes already inside the string.
 	var games []string
 	for i, g := range d.Match.Games {
-		label := fmt.Sprintf("G%d", g.Number)
+		name := stMuted.Render(fmt.Sprintf("G%d", g.Number))
+		if i == m.gameIdx {
+			name = stGameActive.Render(fmt.Sprintf("G%d", g.Number))
+		}
+		var marker string
 		switch g.State {
 		case esports.StateInProgress:
-			label += " " + stLive.Render("●")
+			marker = stLive.Render("●")
 		case esports.StateCompleted:
-			label += " ✓"
+			marker = stMuted.Render("✓")
 		default:
-			label += " ·"
+			marker = stMuted.Render("·")
 		}
-		if i == m.gameIdx {
-			label = stTabActive.Render(label)
-		} else {
-			label = stTab.Render(label)
-		}
-		games = append(games, label)
+		games = append(games, m.zones.Mark(gameZone(i), " "+name+" "+marker+" "))
 	}
 	return line1 + "\n" + strings.Join(games, "")
 }
 
-func (m Model) renderGame(gm esports.Game, g *livestats.Game) string {
+func (m Model) renderGame(gm esports.Game, full *livestats.Game) string {
+	// Everything below shows the game at the playhead, not the newest frame.
+	at := m.playhead(gm.ID, full)
+	g := full.At(at)
 	var b strings.Builder
 	// The feed's team ids decide the sides; the gateway's game "side" field
 	// has been seen swapped.
@@ -214,14 +241,14 @@ func (m Model) renderGame(gm esports.Game, g *livestats.Game) string {
 	stateTag := ""
 	switch state {
 	case livestats.GameInGame:
-		stateTag = stLive.Render("● LIVE")
+		stateTag = stLive.Render("● LIVE") + stMuted.Render("  stats run about a minute behind the broadcast")
 	case livestats.GamePaused:
 		stateTag = stAccent.Render("❚❚ PAUSED")
 	case livestats.GameFinished:
 		stateTag = stMuted.Render("FINAL")
 	}
-	fmt.Fprintf(&b, "%s  %s  %s\n\n", stBold.Render(fmt.Sprintf("Game %d", gm.Number)), stateTag,
-		stAccent.Render(fmtClock(g.Clock())))
+	fmt.Fprintf(&b, "%s  %s  %s\n\n", stBold.Render(fmt.Sprintf("Game %d", gm.Number)),
+		stAccent.Render(fmtClock(full.ClockAt(at))), stateTag)
 
 	// Team summary.
 	bt, rt := g.Latest.BlueTeam, g.Latest.RedTeam

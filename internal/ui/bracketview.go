@@ -109,7 +109,11 @@ func (m Model) selectedID() string {
 }
 
 func (m Model) box(x *bracket.Match) string {
-	return matchBox(x, "", x != nil && x.ID == m.selectedID())
+	b := matchBox(x, "", x != nil && x.ID == m.selectedID())
+	if x == nil {
+		return b
+	}
+	return m.zones.Mark(boxZone(x.ID), b)
 }
 
 // playInOrder is the cursor order of Play-In matches.
@@ -169,8 +173,8 @@ func (m Model) matchList(ms []*bracket.Match) string {
 		if !x.Start.IsZero() {
 			when = x.Start.Local().Format("Mon 02 Jan 15:04")
 		}
-		fmt.Fprintf(&b, "  %s  %s  %s %s\n", stMuted.Render(pad(when, 16)), matchStateTag(x.State),
-			matchLine(x, false), stMuted.Render(bestOf(x.BestOf)))
+		b.WriteString(m.zones.Mark(lineZone(x.ID), fmt.Sprintf("  %s  %s  %s %s", stMuted.Render(pad(when, 16)),
+			matchStateTag(x.State), matchLine(x, false), stMuted.Render(bestOf(x.BestOf)))) + "\n")
 	}
 	return b.String()
 }
@@ -225,7 +229,7 @@ func (m Model) renderSwiss() (string, int) {
 				if x.ID == sel {
 					focusRow = len(lines)
 				}
-				lines = append(lines, matchLine(x, x.ID == sel))
+				lines = append(lines, m.zones.Mark(lineZone(x.ID), matchLine(x, x.ID == sel)))
 			}
 		}
 		cols = append(cols, lines)
@@ -427,8 +431,8 @@ func (m Model) renderSchedule() (string, int) {
 		if i == sel {
 			focus = row
 		}
-		fmt.Fprintf(&b, "%s  %s %s  %s\n", stMuted.Render(e.StartTime.Local().Format("15:04")),
-			matchStateTag(e.State), matchLine(x, i == sel), stMuted.Render(pad(e.BlockName, 14)+" "+bestOf(x.BestOf)))
+		b.WriteString(m.zones.Mark(lineZone(x.ID), fmt.Sprintf("%s  %s %s  %s", stMuted.Render(e.StartTime.Local().Format("15:04")),
+			matchStateTag(e.State), matchLine(x, i == sel), stMuted.Render(pad(e.BlockName, 14)+" "+bestOf(x.BestOf)))) + "\n")
 		row++
 	}
 	return b.String(), focus

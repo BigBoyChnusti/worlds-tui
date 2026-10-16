@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+// keepFrames is how far back from the newest frame full frames are kept
+// for replay.
+const keepFrames = 2 * time.Minute
+
+// WindowSpan is the stretch of game time one feed request covers.
+const WindowSpan = 10 * time.Second
+
 // maxContiguousGap is the largest gap between two observed frames that is
 // still treated as continuous when accounting for pauses. Larger gaps come
 // from sampled backfill and are ignored.
@@ -37,6 +44,8 @@ type Game struct {
 	Latest   *WindowFrame
 	Details  *DetailsFrame
 	obs      []observation
+	frames   []WindowFrame  // recent full frames, oldest first
+	details  []DetailsFrame // recent details frames, oldest first
 	hasStart bool
 }
 
@@ -69,9 +78,13 @@ func (g *Game) ApplyWindow(w *Window) {
 	for i := range w.Frames {
 		f := w.Frames[i]
 		g.insert(observation{at: f.Timestamp, state: f.GameState, blueGold: f.BlueTeam.TotalGold, redGold: f.RedTeam.TotalGold})
+		g.frames = insertFrame(g.frames, f, func(f WindowFrame) time.Time { return f.Timestamp })
 		if g.Latest == nil || !f.Timestamp.Before(g.Latest.Timestamp) {
 			g.Latest = &f
 		}
+	}
+	if g.Latest != nil {
+		g.frames = trimFrames(g.frames, g.Latest.Timestamp, func(f WindowFrame) time.Time { return f.Timestamp })
 	}
 	if !g.hasStart && len(g.obs) > 0 {
 		g.Start = g.obs[0].at
@@ -85,10 +98,79 @@ func (g *Game) ApplyDetails(d *Details) {
 	}
 	for i := range d.Frames {
 		f := d.Frames[i]
+		g.details = insertFrame(g.details, f, func(f DetailsFrame) time.Time { return f.Timestamp })
 		if g.Details == nil || !f.Timestamp.Before(g.Details.Timestamp) {
 			g.Details = &f
 		}
 	}
+	if g.Details != nil {
+		g.details = trimFrames(g.details, g.Details.Timestamp, func(f DetailsFrame) time.Time { return f.Timestamp })
+	}
+}
+
+// insertFrame adds f to the time-sorted frames, replacing a frame with the
+// same timestamp.
+func insertFrame[F any](frames []F, f F, at func(F) time.Time) []F {
+	t := at(f)
+	i := sort.Search(len(frames), func(i int) bool { return !at(frames[i]).Before(t) })
+	if i < len(frames) && at(frames[i]).Equal(t) {
+		frames[i] = f
+		return frames
+	}
+	var zero F
+	frames = append(frames, zero)
+	copy(frames[i+1:], frames[i:])
+	frames[i] = f
+	return frames
+}
+
+// trimFrames drops frames older than keepFrames before newest.
+func trimFrames[F any](frames []F, newest time.Time, at func(F) time.Time) []F {
+	cut := newest.Add(-keepFrames)
+	i := sort.Search(len(frames), func(i int) bool { return !at(frames[i]).Before(cut) })
+	return frames[i:]
+}
+
+// frameAt returns the newest frame at or before t, or the oldest kept
+// frame when t is earlier than all of them.
+func frameAt[F any](frames []F, t time.Time, at func(F) time.Time) *F {
+	if len(frames) == 0 {
+		return nil
+	}
+	i := sort.Search(len(frames), func(i int) bool { return at(frames[i]).After(t) })
+	if i == 0 {
+		return &frames[0]
+	}
+	return &frames[i-1]
+}
+
+// At returns a view of the game as it was at t: Latest and Details are the
+// frames current at that moment. The view shares data with g and must not
+// be modified.
+func (g *Game) At(t time.Time) *Game {
+	v := *g
+	if f := frameAt(g.frames, t, func(f WindowFrame) time.Time { return f.Timestamp }); f != nil {
+		v.Latest = f
+	}
+	if f := frameAt(g.details, t, func(f DetailsFrame) time.Time { return f.Timestamp }); f != nil {
+		v.Details = f
+	}
+	return &v
+}
+
+// NextWindow is the starting time of the feed window after the newest
+// frame, so consecutive requests neither repeat nor skip a window. When the
+// game is far behind live (just opened), it jumps to live; the history in
+// between comes from the sampled backfill.
+func (g *Game) NextWindow(live time.Time) time.Time {
+	if g.Latest == nil {
+		return live
+	}
+	next := g.Latest.Timestamp.UTC().Truncate(WindowSpan).Add(WindowSpan)
+	if next.Before(live.Add(-3 * WindowSpan)) {
+		return live
+	}
+	return next
 }
 
 func (g *Game) insert(o observation) {
@@ -123,14 +205,29 @@ func (g *Game) pausedBefore(n int) time.Duration {
 	return paused
 }
 
-// Clock is the in-game time of the newest frame: wall time since the first
-// frame minus observed pauses. Pauses that fall between sampled frames are
-// not visible, so the value is an approximation of the in-game timer.
+// Clock is the in-game time of the newest frame.
 func (g *Game) Clock() time.Duration {
-	if g.Latest == nil || g.Start.IsZero() {
+	if g.Latest == nil {
 		return 0
 	}
-	c := g.Latest.Timestamp.Sub(g.Start) - g.pausedBefore(len(g.obs)-1)
+	return g.ClockAt(g.Latest.Timestamp)
+}
+
+// ClockAt is the in-game time at wall time t: time since the first frame
+// minus observed pauses, frozen while the game is paused. Pauses that fall
+// between sampled frames are not visible, so it approximates the in-game
+// timer.
+func (g *Game) ClockAt(t time.Time) time.Duration {
+	if g.Start.IsZero() {
+		return 0
+	}
+	// Last observation at or before t.
+	n := sort.Search(len(g.obs), func(i int) bool { return g.obs[i].at.After(t) }) - 1
+	paused := g.pausedBefore(n)
+	if n >= 0 && g.obs[n].state == GamePaused && t.Sub(g.obs[n].at) <= maxContiguousGap {
+		paused += t.Sub(g.obs[n].at)
+	}
+	c := t.Sub(g.Start) - paused
 	if c < 0 {
 		return 0
 	}

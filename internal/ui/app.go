@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/BigBoyChnusti/worlds-tui/internal/bracket"
 	"github.com/BigBoyChnusti/worlds-tui/internal/ddragon"
@@ -34,7 +35,7 @@ const (
 	requestTimeout  = 20 * time.Second
 	liveListEvery   = 30 * time.Second
 	detailsEvery    = 30 * time.Second
-	startRetryEvery = 30 * time.Second
+	startRetryEvery = 15 * time.Second
 	backfillStep    = time.Minute
 )
 
@@ -44,15 +45,21 @@ type Config struct {
 	LeagueSlug     string
 	TournamentSlug string        // empty picks the current tournament
 	GameID         string        // open this game on start (replay)
-	Refresh        time.Duration // live game poll interval
+	Refresh        time.Duration // minimum time between live stats requests
 	DataRefresh    time.Duration // standings/schedule refresh interval
 }
 
+// playState anchors the replay of a live game: game wall time at was
+// shown at real time wall, and the playhead advances in real time from
+// there.
+type playState struct{ at, wall time.Time }
+
 type Model struct {
-	cfg Config
-	es  *esports.Client
-	ls  *livestats.Client
-	dd  *ddragon.Client
+	cfg   Config
+	zones *zone.Manager // clickable regions of the last rendered view
+	es    *esports.Client
+	ls    *livestats.Client
+	dd    *ddragon.Client
 
 	tournament esports.Tournament
 	stages     []esports.Stage
@@ -83,6 +90,7 @@ type Model struct {
 	backfilled   map[string]bool
 	polling      bool
 	lastPoll     time.Time
+	play         map[string]playState
 	ddData       *ddragon.Data
 	ddLoading    bool
 
@@ -96,19 +104,21 @@ type Model struct {
 
 func New(cfg Config) Model {
 	if cfg.Refresh <= 0 {
-		cfg.Refresh = 10 * time.Second
+		cfg.Refresh = 2 * time.Second
 	}
 	if cfg.DataRefresh <= 0 {
 		cfg.DataRefresh = time.Minute
 	}
 	return Model{
 		cfg:          cfg,
+		zones:        zone.New(),
 		es:           esports.NewClient(),
 		ls:           livestats.NewClient(),
 		dd:           ddragon.NewClient(),
 		games:        map[string]*livestats.Game{},
 		startAttempt: map[string]time.Time{},
 		backfilled:   map[string]bool{},
+		play:         map[string]playState{},
 		gameIdx:      -1,
 		preferGame:   cfg.GameID,
 		now:          time.Now(),
@@ -249,12 +259,11 @@ func (m Model) startGame(gameID string) tea.Cmd {
 	}
 }
 
-func (m Model) pollGame(gameID string) tea.Cmd {
+func (m Model) pollGame(gameID string, at time.Time) tea.Cmd {
 	ls := m.ls
 	return func() tea.Msg {
 		c, cancel := ctx()
 		defer cancel()
-		at := livestats.LiveStartingTime(time.Now())
 		w, err := ls.Window(c, gameID, at)
 		if err != nil {
 			return gamePollMsg{gameID: gameID, err: err}
@@ -419,9 +428,55 @@ func (m *Model) ensureGame() tea.Cmd {
 	if time.Since(m.lastPoll) < m.cfg.Refresh {
 		return nil
 	}
+	// Ask for the window after the newest frame once the feed can have it.
+	live := livestats.LiveStartingTime(time.Now())
+	at := g.NextWindow(live)
+	if at.After(live) {
+		return nil
+	}
 	m.polling = true
 	m.lastPoll = time.Now()
-	return m.pollGame(gm.ID)
+	return m.pollGame(gm.ID, at)
+}
+
+// playhead is the moment of a game the Live tab shows. For a running game
+// it trails the newest frame by about one feed window and advances in real
+// time, so the clock ticks every second and events appear when they
+// happened. A finished game shows its last frame.
+func (m Model) playhead(gameID string, g *livestats.Game) time.Time {
+	if g == nil || g.Latest == nil {
+		return time.Time{}
+	}
+	p, ok := m.play[gameID]
+	if !ok {
+		return g.Latest.Timestamp
+	}
+	t := p.at.Add(m.now.Sub(p.wall))
+	if t.After(g.Latest.Timestamp) {
+		t = g.Latest.Timestamp
+	}
+	return t
+}
+
+// advancePlay re-anchors the replay after new frames arrive, and holds it
+// at the newest frame while waiting for more so it resumes smoothly.
+func (m *Model) advancePlay(gameID string, g *livestats.Game, newData bool) {
+	if g == nil || g.Latest == nil {
+		return
+	}
+	latest := g.Latest.Timestamp
+	p, ok := m.play[gameID]
+	switch {
+	case !ok && newData && g.State() != livestats.GameFinished:
+		m.play[gameID] = playState{at: latest.Add(-livestats.WindowSpan), wall: m.now}
+	case !ok:
+		return
+	case newData && m.playhead(gameID, g).Before(latest.Add(-3*livestats.WindowSpan)):
+		// Fell far behind (feed burst or catch-up): skip ahead.
+		m.play[gameID] = playState{at: latest.Add(-livestats.WindowSpan), wall: m.now}
+	case p.at.Add(m.now.Sub(p.wall)).After(latest):
+		m.play[gameID] = playState{at: latest, wall: m.now}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -432,6 +487,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 
 	case tickMsg:
 		m.now = time.Time(msg)
@@ -448,6 +506,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			(m.details == nil || m.details.Match.State != esports.StateCompleted) {
 			m.lastDetails = time.Now()
 			cmds = append(cmds, m.loadDetails(m.matchID))
+		}
+		if gm, ok := m.currentGame(); ok {
+			m.advancePlay(gm.ID, m.games[gm.ID], false)
 		}
 		cmds = append(cmds, m.ensureGame())
 		return m, tea.Batch(cmds...)
@@ -518,11 +579,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ddLoading = true
 			cmds = append(cmds, m.loadDDragon(g.Meta.PatchVersion))
 		}
-		if !m.polling {
-			m.polling = true
-			m.lastPoll = time.Now()
-			cmds = append(cmds, m.pollGame(msg.gameID))
-		}
+		cmds = append(cmds, m.ensureGame())
 		return m, tea.Batch(cmds...)
 
 	case gamePollMsg:
@@ -534,8 +591,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && !errors.Is(msg.err, livestats.ErrNoData) {
 			m.setErr(msg.err)
 		}
+		var before time.Time
+		if g.Latest != nil {
+			before = g.Latest.Timestamp
+		}
 		g.ApplyWindow(msg.window)
 		g.ApplyDetails(msg.details)
+		m.now = time.Now()
+		m.advancePlay(msg.gameID, g, g.Latest != nil && g.Latest.Timestamp.After(before))
 		if !m.backfilled[msg.gameID] && g.Latest != nil {
 			m.backfilled[msg.gameID] = true
 			return m, m.backfill(msg.gameID, g.Start, g.Latest.Timestamp)
@@ -587,16 +650,15 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = int(k.String()[0] - '1')
 		return m, nil
 	case "right", "l":
+		// Tabs change only with tab/shift+tab and the number keys.
 		if m.tab == tabLive {
 			return m.switchGame(1)
 		}
-		m.tab = (m.tab + 1) % tabCount
 		return m, nil
 	case "left", "h":
 		if m.tab == tabLive {
 			return m.switchGame(-1)
 		}
-		m.tab = (m.tab + tabCount - 1) % tabCount
 		return m, nil
 	case "]":
 		return m.switchGame(1)
@@ -649,6 +711,77 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// handleMouse scrolls with the wheel and opens what was clicked: menu
+// items, tabs, games of the open match and matches in the bracket views.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action == tea.MouseActionPress {
+		step := 0
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			step = -1
+		case tea.MouseButtonWheelDown:
+			step = 1
+		}
+		if step != 0 {
+			if m.inMenu {
+				m.menuCursor = (m.menuCursor + step + len(menuItems)) % len(menuItems)
+			} else {
+				if m.tab == tabLive {
+					step *= 3
+				}
+				m.move(step)
+			}
+			return m, nil
+		}
+	}
+	if msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	if m.inMenu {
+		for i := range menuItems {
+			if m.zones.Get(menuZone(i)).InBounds(msg) {
+				m.menuCursor = i
+				m, quit := m.handleMenuKey("enter")
+				if quit {
+					return m, tea.Quit
+				}
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+
+	for i := range tabNames {
+		if m.zones.Get(tabZone(i)).InBounds(msg) {
+			m.tab = i
+			return m, nil
+		}
+	}
+	if m.tab == tabLive && m.details != nil {
+		for i := range m.details.Match.Games {
+			if m.zones.Get(gameZone(i)).InBounds(msg) {
+				return m.switchGame(i - m.gameIdx)
+			}
+		}
+		return m, nil
+	}
+	for c, id := range m.tabMatchIDs(m.tab) {
+		if m.zones.Get(boxZone(id)).InBounds(msg) || m.zones.Get(lineZone(id)).InBounds(msg) {
+			m.cursors[m.tab] = c
+			return m, m.openMatch(id, true)
+		}
+	}
+	return m, nil
+}
+
+// Zone ids for clickable regions.
+func menuZone(i int) string     { return fmt.Sprintf("menu-%d", i) }
+func tabZone(i int) string      { return fmt.Sprintf("tab-%d", i) }
+func gameZone(i int) string     { return fmt.Sprintf("game-%d", i) }
+func boxZone(id string) string  { return "box-" + id }
+func lineZone(id string) string { return "line-" + id }
 
 func (m Model) switchGame(delta int) (tea.Model, tea.Cmd) {
 	if m.details == nil || len(m.details.Match.Games) == 0 {
@@ -708,7 +841,7 @@ func (m Model) View() string {
 		return "loading…"
 	}
 	if m.inMenu {
-		return m.renderMenu()
+		return m.zones.Scan(m.renderMenu())
 	}
 	header := m.renderHeader()
 	footer := m.renderFooter()
@@ -729,7 +862,7 @@ func (m Model) View() string {
 		body, focus = m.renderSchedule()
 	}
 	body = m.crop(body, focus, bodyH)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	return m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
 }
 
 // crop fits body into h lines. With a focus line the view scrolls just
@@ -766,9 +899,9 @@ func (m Model) renderHeader() string {
 	var tabs []string
 	for i, n := range tabNames {
 		if i == m.tab {
-			tabs = append(tabs, stTabActive.Render(n))
+			tabs = append(tabs, m.zones.Mark(tabZone(i), stTabActive.Render(n)))
 		} else {
-			tabs = append(tabs, stTab.Render(n))
+			tabs = append(tabs, m.zones.Mark(tabZone(i), stTab.Render(n)))
 		}
 	}
 	live := ""
@@ -784,11 +917,11 @@ func (m Model) renderFooter() string {
 	var keys string
 	switch m.tab {
 	case tabLive:
-		keys = "←/→ game · n next live · f follow live · j/k scroll"
+		keys = "←/→ game · n next live · f follow live · ↑/↓ scroll"
 	default:
-		keys = "↑/↓ select · enter open match"
+		keys = "↑/↓ select · enter or click open match"
 	}
-	keys += " · 1-5/tab views · esc menu · r refresh · q quit"
+	keys += " · tab/1-5 views · esc menu · r refresh · q quit"
 	status := ""
 	if m.err != nil && time.Since(m.errAt) < 30*time.Second {
 		status = stRed.Render("⚠ " + m.err.Error())

@@ -31,6 +31,8 @@ var (
 
 	stTab       = lipgloss.NewStyle().Padding(0, 1).Foreground(colMuted)
 	stTabActive = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(colAccent).Underline(true)
+	// stGameActive marks the selected game; only render plain text with it.
+	stGameActive = lipgloss.NewStyle().Bold(true).Foreground(colAccent).Underline(true)
 
 	stBox         = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colBorder).Padding(0, 1)
 	stBoxSelected = stBox.BorderForeground(colAccent)

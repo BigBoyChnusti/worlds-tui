@@ -121,3 +121,56 @@ func TestClockSkipsPauses(t *testing.T) {
 		t.Errorf("clock across sampled gap = %v, want %v", got, want)
 	}
 }
+
+func TestNextWindow(t *testing.T) {
+	g := NewGame("x")
+	live := time.Date(2026, 10, 17, 20, 0, 0, 0, time.UTC)
+	if got := g.NextWindow(live); !got.Equal(live) {
+		t.Errorf("no frames: %v, want live %v", got, live)
+	}
+	// Newest frame inside the 19:59:30 window: next is 19:59:40.
+	g.ApplyWindow(&Window{Frames: []WindowFrame{frame(live.Add(-29500*time.Millisecond), GameInGame, 0, 0)}})
+	if got, want := g.NextWindow(live), live.Add(-20*time.Second); !got.Equal(want) {
+		t.Errorf("next window = %v, want %v", got, want)
+	}
+	// Far behind live, e.g. just after opening a running game: jump to live.
+	g2 := NewGame("y")
+	g2.ApplyWindow(&Window{Frames: []WindowFrame{frame(live.Add(-20*time.Minute), GameInGame, 0, 0)}})
+	if got := g2.NextWindow(live); !got.Equal(live) {
+		t.Errorf("far behind: %v, want live", got)
+	}
+}
+
+func TestAtAndClockAt(t *testing.T) {
+	t0 := time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)
+	g := NewGame("x")
+	g.SetStart(&Window{Frames: []WindowFrame{frame(t0, GameInGame, 2500, 2500)}})
+	var frames []WindowFrame
+	for i := 0; i <= 20; i++ {
+		state := GameInGame
+		if i >= 10 && i < 15 {
+			state = GamePaused
+		}
+		frames = append(frames, frame(t0.Add(time.Duration(100+i)*time.Second), state, 3000+i, 3000))
+	}
+	g.ApplyWindow(&Window{Frames: frames})
+
+	// Between frames the view holds the earlier frame.
+	if v := g.At(t0.Add(105*time.Second + 500*time.Millisecond)); v.Latest.BlueTeam.TotalGold != 3005 {
+		t.Errorf("At picked gold %d, want 3005", v.Latest.BlueTeam.TotalGold)
+	}
+	if g.Latest.BlueTeam.TotalGold != 3020 {
+		t.Error("At changed the game itself")
+	}
+	// The clock runs in real time between frames and stops while paused.
+	if got := g.ClockAt(t0.Add(105*time.Second + 500*time.Millisecond)); got != 105*time.Second+500*time.Millisecond {
+		t.Errorf("clock mid-game = %v", got)
+	}
+	a, b := g.ClockAt(t0.Add(111*time.Second)), g.ClockAt(t0.Add(113*time.Second))
+	if a != b || a != 110*time.Second {
+		t.Errorf("clock during pause moved: %v then %v, want 1m50s", a, b)
+	}
+	if got := g.ClockAt(t0.Add(120 * time.Second)); got != 115*time.Second {
+		t.Errorf("clock after a 5s pause = %v, want 1m55s", got)
+	}
+}

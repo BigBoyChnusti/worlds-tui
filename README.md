@@ -37,7 +37,7 @@ worlds-tui
 |---|---|---|
 | `-tournament` | current | Tournament slug, e.g. `worlds_2025` |
 | `-game` | | Open a game id on start, e.g. to replay a finished game |
-| `-refresh` | `10s` | Live game poll interval |
+| `-refresh` | `2s` | Minimum time between live stats requests |
 | `-data-refresh` | `1m` | Standings and schedule refresh interval |
 | `-version` | | Print the version and exit |
 | `-snapshot` | | Print the menu and every view once and exit (`-width` and `-height` set the size) |
@@ -55,7 +55,8 @@ small for them.
 
 | Key | |
 |---|---|
-| `1`–`5`, `tab` | Live · Play-In · Swiss · Knockouts · Schedule |
+| `tab`, `shift+tab` | Next/previous view |
+| `1`–`5` | Jump to Live · Play-In · Swiss · Knockouts · Schedule |
 | `esc`, `m` | Back to the main menu |
 | `↑`/`↓`, `j`/`k` | Select a match (bracket tabs) or scroll (Live) |
 | `enter` | Open the selected match on the Live tab |
@@ -64,6 +65,10 @@ small for them.
 | `f` | Follow the live match again after opening another one |
 | `r` | Refresh now |
 | `q` | Quit |
+
+The mouse works too: click a tab, a menu entry, a game of the open series
+or any match in the bracket and schedule views, and scroll with the wheel.
+Hold `shift` while dragging to select text in most terminals.
 
 - **Live**: series score, game clock, team kills, gold, towers,
   inhibitors, barons and dragons, a gold-lead graph, and a 5v5 table with
@@ -91,9 +96,11 @@ endpoints as [lolesports.com](https://lolesports.com):
 
 Things the feed doesn't provide and the app derives:
 
-- **Game clock**: time since the game's first frame, minus pauses seen
-  between consecutive frames. Pauses that fall between sampled frames
-  aren't seen, so it can run slightly ahead of the in-game timer.
+- **Game clock**: time since the game's first frame, minus pauses. The app
+  fetches each 10-second feed window as soon as it exists and replays its
+  frames in real time, so the clock ticks every second and kills, gold and
+  objectives change when they happened, about a minute behind the
+  broadcast.
 - **Gold leads**: blue minus red team gold, and per lane by role.
 - **Bracket structure**: the gateway's `previousMatchIds` are empty, so
   stages are laid out from schedule order and block names. Swiss records
@@ -105,6 +112,10 @@ Caveats:
 - `startingTime` must be a multiple of 10 seconds, and the feed has no
   frames for roughly the last minute, so live stats run about a minute
   behind real time.
+- The gateway marks a game as in progress before the feed has data for it
+  (during the draft), and the feed has been seen returning nothing for a
+  running game for over 20 minutes before catching up. The Live tab says
+  so and keeps retrying.
 - The gateway's per-game `side` field has been seen swapped; team sides
   come from the feed's `esportsTeamId` instead.
 

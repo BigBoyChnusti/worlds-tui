@@ -204,7 +204,7 @@ func (m Model) renderMenuList() string {
 		} else {
 			label = stBold.Render(label)
 		}
-		lines = append(lines, marker+stMuted.Render(key+"  ")+label+" "+m.itemStatus(it))
+		lines = append(lines, m.zones.Mark(menuZone(i), marker+stMuted.Render(key+"  ")+label+" "+m.itemStatus(it)))
 		if it.tab == tabSchedule {
 			lines = append(lines, "")
 		}
@@ -217,7 +217,7 @@ func (m Model) renderMenuList() string {
 }
 
 func (m Model) renderMenu() string {
-	help := stMuted.Render("↑/↓ select · enter open · 1-5 jump · esc back to menu from any view · q quit")
+	help := stMuted.Render("↑/↓ or mouse select · enter or click open · 1-5 jump · esc back to menu from any view · q quit")
 	list := m.renderMenuList()
 
 	var logo string
