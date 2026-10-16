@@ -22,13 +22,14 @@ func main() {
 	flag.DurationVar(&cfg.DataRefresh, "data-refresh", time.Minute, "standings and schedule refresh interval")
 	snapshot := flag.Bool("snapshot", false, "print every view once and exit instead of starting the TUI")
 	width := flag.Int("width", 120, "snapshot width")
+	height := flag.Int("height", 50, "snapshot height")
 	flag.Parse()
 
 	cfg.LeagueID = esports.WorldsLeagueID
 	cfg.LeagueSlug = "worlds"
 
 	if *snapshot {
-		fmt.Println(ui.Snapshot(cfg, *width, 200))
+		fmt.Println(ui.Snapshot(cfg, *width, *height))
 		return
 	}
 

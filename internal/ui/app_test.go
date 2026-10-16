@@ -74,6 +74,10 @@ func press(t *testing.T, m Model, keys ...string) (Model, tea.Cmd) {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "right":
 			msg = tea.KeyMsg{Type: tea.KeyRight}
+		case "esc":
+			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "down":
+			msg = tea.KeyMsg{Type: tea.KeyDown}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -83,6 +87,51 @@ func press(t *testing.T, m Model, keys ...string) (Model, tea.Cmd) {
 }
 
 func plain(m Model) string { return ansi.Strip(m.View()) }
+
+func TestMenu(t *testing.T) {
+	m := fixtureModel(t)
+	if !m.inMenu {
+		t.Fatal("app should start on the menu")
+	}
+	v := plain(m)
+	for _, w := range []string{"██╗    ██╗", trophyGem, "Live", "Play-In", "Swiss Stage", "Knockouts", "Schedule", "Quit", "complete"} {
+		if !strings.Contains(v, w) {
+			t.Errorf("menu missing %q in\n%s", w, v)
+		}
+	}
+
+	m, _ = press(t, m, "down", "down", "enter")
+	if m.inMenu || m.tab != tabSwiss {
+		t.Fatalf("enter on Swiss Stage: inMenu=%v tab=%d", m.inMenu, m.tab)
+	}
+	m, _ = press(t, m, "esc")
+	if !m.inMenu || m.menuCursor != tabSwiss {
+		t.Fatalf("esc did not return to the menu on the current view: inMenu=%v cursor=%d", m.inMenu, m.menuCursor)
+	}
+	m, _ = press(t, m, "4")
+	if m.inMenu || m.tab != tabKnockout {
+		t.Fatalf("4 from the menu: inMenu=%v tab=%d", m.inMenu, m.tab)
+	}
+
+	m, _ = press(t, m, "esc", "down", "down") // Knockouts -> Schedule -> Quit
+	if menuItems[m.menuCursor].tab != -1 {
+		t.Fatalf("cursor on %q, want Quit", menuItems[m.menuCursor].label)
+	}
+	_, cmd := press(t, m, "enter")
+	if cmd == nil {
+		t.Fatal("Quit did not return a command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("Quit did not quit")
+	}
+
+	// A narrow, short terminal drops the trophy and the block logo.
+	m.width, m.height = 70, 22
+	v = plain(m)
+	if strings.Contains(v, trophyGem) || !strings.Contains(v, "W O R L D S") {
+		t.Errorf("small menu layout wrong:\n%s", v)
+	}
+}
 
 func TestTabsRenderStages(t *testing.T) {
 	m := fixtureModel(t)

@@ -60,12 +60,14 @@ type Model struct {
 	bracket    bracket.Tournament
 	live       []esports.Event
 
-	tab     int
-	width   int
-	height  int
-	cursors [tabCount]int
-	scrolls [tabCount]int
-	now     time.Time
+	tab        int
+	inMenu     bool
+	menuCursor int
+	width      int
+	height     int
+	cursors    [tabCount]int
+	scrolls    [tabCount]int
+	now        time.Time
 
 	// The match shown on the Live tab. pinned means the user chose it;
 	// otherwise the first live Worlds match is followed automatically.
@@ -110,6 +112,7 @@ func New(cfg Config) Model {
 		gameIdx:      -1,
 		preferGame:   cfg.GameID,
 		now:          time.Now(),
+		inMenu:       cfg.GameID == "",
 	}
 }
 
@@ -560,9 +563,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
-	case "q", "ctrl+c":
+	if k.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.inMenu {
+		if k.String() == "q" {
+			return m, tea.Quit
+		}
+		m, quit := m.handleMenuKey(k.String())
+		if quit {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	switch k.String() {
+	case "q":
+		return m, tea.Quit
+	case "esc", "m":
+		m.inMenu = true
+		m.menuCursor = m.tab
+		return m, nil
 	case "1", "2", "3", "4", "5":
 		m.tab = int(k.String()[0] - '1')
 		return m, nil
@@ -687,6 +707,9 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
+	if m.inMenu {
+		return m.renderMenu()
+	}
 	header := m.renderHeader()
 	footer := m.renderFooter()
 	bodyH := max(1, m.height-lipgloss.Height(header)-lipgloss.Height(footer))
@@ -765,7 +788,7 @@ func (m Model) renderFooter() string {
 	default:
 		keys = "↑/↓ select · enter open match"
 	}
-	keys += " · 1-5/tab views · r refresh · q quit"
+	keys += " · 1-5/tab views · esc menu · r refresh · q quit"
 	status := ""
 	if m.err != nil && time.Since(m.errAt) < 30*time.Second {
 		status = stRed.Render("⚠ " + m.err.Error())

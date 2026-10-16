@@ -6,7 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Snapshot loads the data once and renders every tab as plain text, for
+// Snapshot loads the data once and renders the menu and every tab, for
 // non-interactive use and debugging. It drives the model with the same
 // messages the TUI uses, so the output matches what the interface shows.
 func Snapshot(cfg Config, width, height int) string {
@@ -35,7 +35,9 @@ func Snapshot(cfg Config, width, height int) string {
 	}
 
 	m = model.(Model)
-	var out []string
+	m.inMenu = true
+	out := []string{m.View()}
+	m.inMenu = false
 	for t := 0; t < tabCount; t++ {
 		m.tab = t
 		out = append(out, m.View())

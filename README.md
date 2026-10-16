@@ -20,15 +20,23 @@ Or from a checkout: `go run ./cmd/worlds-tui`.
 | `-game` | | Open a game id on start, e.g. to replay a finished game |
 | `-refresh` | `10s` | Live game poll interval |
 | `-data-refresh` | `1m` | Standings and schedule refresh interval |
-| `-snapshot` | | Print every view once and exit (`-width` sets the width) |
+| `-snapshot` | | Print the menu and every view once and exit (`-width` and `-height` set the size) |
 
-Try a finished game: `worlds-tui -tournament worlds_2025 -game 113475798006664579`.
+Try a finished game: `worlds-tui -tournament worlds_2025 -game 113475798006664579`
+(with `-game` the app skips the menu and opens the game directly).
 
 ## Views and keys
+
+The app opens on a main menu with the logo, the Summoner's Cup and a status
+line for each section (live match or next match countdown, stage
+progress). Pick a section with the arrow keys and `enter`, or press its
+number. The trophy and block logo are left out when the terminal is too
+small for them.
 
 | Key | |
 |---|---|
 | `1`–`5`, `tab` | Live · Play-In · Swiss · Knockouts · Schedule |
+| `esc`, `m` | Back to the main menu |
 | `↑`/`↓`, `j`/`k` | Select a match (bracket tabs) or scroll (Live) |
 | `enter` | Open the selected match on the Live tab |
 | `←`/`→`, `[`/`]` | Previous/next game of the series on the Live tab |
