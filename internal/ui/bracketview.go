@@ -128,11 +128,9 @@ func (m Model) renderPlayIn() (string, int) {
 		return stMuted.Render("No Play-In data yet."), -1
 	}
 	const h = 17
-	// Upper bracket rows 0-8, lower bracket from row 12.
-	o1, o2, lr1 := 0, 5, 12
-	uf := (o1 + o2) / 2 // centred between the openers
-	lf := lr1
-	gf := (uf + lf) / 2
+	r := playInRows
+	o1, o2, lr1 := r.opener1, r.opener2, r.lower1
+	uf, lf, gf := r.upperFinal, r.lowerFinal, r.final
 
 	col0 := column([]placed{{o1, m.box(p.Openers[0])}, {o2, m.box(p.Openers[1])}, {lr1, m.box(p.LowerRound1)}}, boxW, h)
 	con0 := connectors(h, []link{{o1 + boxExit, o2 + boxExit, uf + boxExit}, {lr1 + boxExit, lr1 + boxExit, 0}})
@@ -363,9 +361,7 @@ func (m Model) renderKnockout() (string, int) {
 		return nil
 	}
 	const h = 4*(boxH+1) - 1
-	qfTop := []int{0, 5, 10, 15}
-	sfTop := []int{(qfTop[0] + qfTop[1]) / 2, (qfTop[2] + qfTop[3]) / 2}
-	fTop := (sfTop[0] + sfTop[1]) / 2
+	qfTop, sfTop, fTop := quarterRows, semiRows, finalRow
 
 	var qf, sf []placed
 	for i, t := range qfTop {

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/muesli/termenv"
 
 	"github.com/BigBoyChnusti/worlds-tui/internal/bracket"
@@ -422,19 +423,27 @@ func TestArrowsDoNotSwitchTabs(t *testing.T) {
 	}
 }
 
-// clickZone renders the view, waits for the zone to be registered and
-// clicks its top-left cell.
+// clickZone renders the view, waits for the zone's position to settle and
+// clicks its top-left cell. bubblezone registers zones on a background
+// goroutine, so right after a view change a zone id that also appeared in
+// the previous view can still report its old position.
 func clickZone(t *testing.T, m Model, id string) Model {
 	t.Helper()
-	m.View()
 	deadline := time.Now().Add(2 * time.Second)
-	z := m.zones.Get(id)
-	for z.IsZero() && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-		z = m.zones.Get(id)
-	}
-	if z.IsZero() {
-		t.Fatalf("zone %q never rendered", id)
+	var z *zone.ZoneInfo
+	for stable := 0; stable < 3; {
+		if time.Now().After(deadline) {
+			t.Fatalf("zone %q never settled", id)
+		}
+		m.View()
+		time.Sleep(10 * time.Millisecond)
+		next := m.zones.Get(id)
+		if !next.IsZero() && z != nil && next.StartX == z.StartX && next.StartY == z.StartY {
+			stable++
+		} else {
+			stable = 0
+		}
+		z = next
 	}
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.MouseMsg{X: z.StartX, Y: z.StartY, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease})
@@ -562,5 +571,170 @@ func TestGameFlagBeatsLiveMatch(t *testing.T) {
 	tm, _ = tm.Update(gameStartMsg{gameID: "113475798006664579", window: &start})
 	if id := tm.(Model).matchID; id != "113475798006664578" {
 		t.Fatalf("opened match %s, want the -game match", id)
+	}
+}
+
+// selected returns the teams of the selected match, e.g. "KC-C9".
+func selected(m Model) string {
+	id := m.selectedID()
+	find := func(ms ...*bracket.Match) string {
+		for _, x := range ms {
+			if x != nil && x.ID == id {
+				return x.Teams[0].Code + "-" + x.Teams[1].Code
+			}
+		}
+		return ""
+	}
+	b := m.bracket
+	if s := find(b.PlayIn.All...); s != "" {
+		return s
+	}
+	for _, r := range b.Swiss.Rounds {
+		if s := find(r...); s != "" {
+			return s
+		}
+	}
+	return find(append(append(append([]*bracket.Match{}, b.Knockout.Quarterfinals...), b.Knockout.Semifinals...), b.Knockout.Final)...)
+}
+
+func TestKnockoutArrows(t *testing.T) {
+	m := fixtureModel(t)
+	m, _ = press(t, m, "4")
+	steps := []struct{ key, want string }{
+		{"", "HLE-GEN"},     // first quarterfinal
+		{"right", "KT-GEN"}, // its semifinal
+		{"right", "T1-KT"},  // the final
+		{"right", "T1-KT"},  // nothing further right
+		{"left", "KT-GEN"},  // tie between the semis goes to the upper one
+		{"down", "TES-T1"},  // the other semifinal
+		{"left", "G2-TES"},  // nearest quarterfinal (rows 10 and 15 vs 12)
+		{"down", "T1-AL"},   // last quarterfinal
+		{"down", "T1-AL"},   // stays at the bottom of the column
+		{"up", "G2-TES"},    // back up
+		{"right", "TES-T1"}, // its semifinal
+		{"up", "KT-GEN"},    // upper semifinal
+		{"left", "HLE-GEN"}, // nearest quarterfinal on a tie: the upper one
+	}
+	for i, s := range steps {
+		if s.key != "" {
+			m, _ = press(t, m, s.key)
+		}
+		if got := selected(m); got != s.want {
+			t.Fatalf("step %d (%s): selected %s, want %s", i, s.key, got, s.want)
+		}
+	}
+}
+
+func TestPlayInArrows(t *testing.T) {
+	m := fixtureModel(t)
+	var st struct {
+		Data struct {
+			Standings []struct {
+				Stages []esports.Stage `json:"stages"`
+			} `json:"standings"`
+		} `json:"data"`
+	}
+	readJSON(t, "../bracket/testdata/standings_2026.json", &st)
+	var events []esports.Event
+	for _, f := range []string{"schedule_page.json", "schedule_newer.json"} {
+		var sc struct {
+			Data struct {
+				Schedule struct {
+					Events []esports.Event `json:"events"`
+				} `json:"schedule"`
+			} `json:"data"`
+		}
+		readJSON(t, "../esports/testdata/"+f, &sc)
+		events = append(events, sc.Data.Schedule.Events...)
+	}
+	m.bracket = bracket.Build(st.Data.Standings[0].Stages, events)
+	m, _ = press(t, m, "2")
+
+	steps := []struct{ key, want string }{
+		{"", "KC-C9"},        // first opener
+		{"right", "KC-MVK"},  // upper final
+		{"right", "TBD-TBD"}, // final
+		{"left", "KC-MVK"},   // tie between upper and lower final: upper
+		{"down", "TBD-TBD"},  // lower final
+		{"left", "C9-FUR"},   // lower round 1, same row
+		{"up", "MVK-FUR"},    // second opener
+		{"up", "KC-C9"},      // first opener
+		{"up", "KC-C9"},      // stays at the top
+	}
+	for i, s := range steps {
+		if s.key != "" {
+			m, _ = press(t, m, s.key)
+		}
+		if got := selected(m); got != s.want {
+			t.Fatalf("step %d (%s): selected %s, want %s", i, s.key, got, s.want)
+		}
+	}
+	if m.tab != tabPlayIn {
+		t.Errorf("arrows left the Play-In tab (tab %d)", m.tab)
+	}
+}
+
+func TestSwissArrows(t *testing.T) {
+	m := fixtureModel(t)
+	m, _ = press(t, m, "3")
+	r := m.bracket.Swiss.Rounds
+	id := func() string { return m.selectedID() }
+
+	if id() != r[0][0].ID {
+		t.Fatal("Swiss does not start on the first match")
+	}
+	// Down stays inside round 1 and stops at its last match.
+	for range 20 {
+		m, _ = press(t, m, "down")
+	}
+	if id() != r[0][len(r[0])-1].ID {
+		t.Errorf("down left round 1 or stopped early")
+	}
+	// Right moves one round at a time, landing on the nearest row.
+	for want := 1; want < len(r); want++ {
+		m, _ = press(t, m, "right")
+		if !containsID(r[want], id()) {
+			t.Fatalf("right %d: selection not in round %d", want, want+1)
+		}
+	}
+	m, _ = press(t, m, "right")
+	if !containsID(r[len(r)-1], id()) {
+		t.Error("right past the last round moved the selection")
+	}
+	m, _ = press(t, m, "left")
+	if !containsID(r[len(r)-2], id()) {
+		t.Error("left did not go back a round")
+	}
+}
+
+// Opening a finished game must not flash its opening frame as a live 00:00
+// before the final frames arrive.
+func TestFinishedGameNoLiveFlash(t *testing.T) {
+	m := fixtureModel(t)
+	m.inMenu, m.tab = false, tabLive
+	m.matchID = "113475798006664578"
+	m.details = &esports.EventDetails{ID: m.matchID, Match: esports.Match{
+		State: esports.StateCompleted,
+		Teams: []esports.Team{
+			{ID: "98767991853197861", Name: "T1", Code: "T1", Result: &esports.Result{GameWins: 1}},
+			{ID: "98926509892121852", Name: "FlyQuest", Code: "FLY", Result: &esports.Result{GameWins: 0}},
+		},
+		Games: []esports.Game{{ID: "113475798006664579", Number: 1, State: esports.StateCompleted}},
+	}}
+	m.gameIdx = 0
+
+	var start, end livestats.Window
+	readJSON(t, "../livestats/testdata/window_start.json", &start)
+	readJSON(t, "../livestats/testdata/window_end.json", &end)
+	var tm tea.Model = m
+	tm, _ = tm.Update(gameStartMsg{gameID: "113475798006664579", window: &start})
+	v := plain(tm.(Model))
+	if strings.Contains(v, "LIVE") || strings.Contains(v, "00:00") || !strings.Contains(v, "loading") {
+		t.Errorf("finished game shown from its opening frame:\n%s", v)
+	}
+	tm, _ = tm.Update(gamePollMsg{gameID: "113475798006664579", window: &end})
+	v = plain(tm.(Model))
+	if !strings.Contains(v, "FINAL") || strings.Contains(v, "loading") {
+		t.Errorf("final state not shown after the poll:\n%s", v)
 	}
 }

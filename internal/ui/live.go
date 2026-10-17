@@ -73,6 +73,12 @@ func (m Model) renderLive() string {
 		}
 		return b.String()
 	}
+	// A finished game first loads its opening frames; showing those would
+	// flash 00:00 marked live until the poll brings its final state.
+	if gm.State == esports.StateCompleted && !m.backfilled[gm.ID] {
+		b.WriteString(stMuted.Render(fmt.Sprintf("Game %d · loading…", gm.Number)))
+		return b.String()
+	}
 	b.WriteString(m.renderGame(gm, g))
 	return b.String()
 }

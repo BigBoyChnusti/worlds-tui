@@ -726,15 +726,18 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = int(k.String()[0] - '1')
 		return m, nil
 	case "right", "l":
-		// Tabs change only with tab/shift+tab and the number keys.
+		// Tabs change only with tab/shift+tab and the number keys; in the
+		// bracket views the arrows move between rounds.
 		if m.tab == tabLive {
 			return m.switchGame(1)
 		}
+		m.navigate(1, 0)
 		return m, nil
 	case "left", "h":
 		if m.tab == tabLive {
 			return m.switchGame(-1)
 		}
+		m.navigate(-1, 0)
 		return m, nil
 	case "]":
 		return m.switchGame(1)
@@ -876,11 +879,13 @@ func (m *Model) move(delta int) {
 		m.scrolls[tabLive] = max(0, m.scrolls[tabLive]+delta)
 		return
 	}
-	n := len(m.tabMatchIDs(m.tab))
-	if n == 0 {
-		return
+	step := 1
+	if delta < 0 {
+		step, delta = -1, -delta
 	}
-	m.cursors[m.tab] = min(n-1, max(0, m.cursors[m.tab]+delta))
+	for range delta {
+		m.navigate(0, step)
+	}
 }
 
 // tabMatchIDs is the cursor order of the selectable matches on a tab.
@@ -995,7 +1000,7 @@ func (m Model) renderFooter() string {
 	case tabLive:
 		keys = "←/→ game · n next live · f follow live · ↑/↓ scroll"
 	default:
-		keys = "↑/↓ select · enter or click open match"
+		keys = "←↑↓→ select · enter or click open match"
 	}
 	keys += " · tab/1-5 views · esc menu · r refresh · q quit"
 	status := ""
