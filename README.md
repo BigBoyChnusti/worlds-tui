@@ -60,9 +60,10 @@ small for them.
 | `tab`, `shift+tab` | Next/previous view |
 | `1`–`5` | Jump to Live · Play-In · Swiss · Knockouts · Schedule |
 | `esc`, `m` | Back to the main menu |
-| `↑`/`↓`, `j`/`k` | Select a match (bracket tabs) or scroll (Live) |
+| `↑`/`↓`, `j`/`k` | Bracket views: move within a round. Live: scroll |
+| `←`/`→`, `h`/`l` | Bracket views: move to the nearest match in the previous/next round. Live: previous/next game of the series |
+| `[`/`]` | Previous/next game of the series |
 | `enter` | Open the selected match on the Live tab |
-| `←`/`→`, `[`/`]` | Previous/next game of the series on the Live tab |
 | `n` | Next live match |
 | `f` | Follow the live match again after opening another one |
 | `r` | Refresh now |
@@ -132,11 +133,18 @@ Tests run against API responses saved in `internal/*/testdata` (Worlds 2025
 and 2026), so they don't need the network.
 
 The demo GIF is recorded with [VHS](https://github.com/charmbracelet/vhs)
-from `demo/demo.tape`. It runs against the live API, so the Live tab shows
-whatever match is on at the time:
+from `demo/demo.tape`, against the live API and the Worlds 2025 results.
+With VHS installed:
 
 ```sh
 vhs demo/demo.tape
+```
+
+Or with the VHS container image, which has no Go, so build the app first:
+
+```sh
+CGO_ENABLED=0 go build -o worlds-tui ./cmd/worlds-tui
+podman run --rm -v "$PWD:/vhs:Z" ghcr.io/charmbracelet/vhs:v0.12.1 demo/demo.tape
 ```
 
 ## CI and releases
